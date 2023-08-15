@@ -1,0 +1,9 @@
+#ifndef MATHDDEFINES
+#define MATHDDEFINES
+
+#define FLT_MAX 3.402823466e+30F
+
+#define PI_1 3.141592653
+#define PI_INV_1 0.31830989
+
+#endif

@@ -1,0 +1,89 @@
+RWTexture2D<float4> RenderTarget;
+
+#pragma max_recursion_depth 5
+
+#include "./ShaderLibrary/Ray.hlsl"
+#include "./ShaderLibrary/PathPayload.hlsl"
+#include "./ShaderLibrary/RaytracingParams.hlsl"
+#include "./ShaderLibrary/Light.hlsl"
+
+
+cbuffer Camera
+{
+	float3 cameraU;
+	float3 cameraV;
+	float3 cameraW;
+	float3 posW;
+
+	float4x4 cameraToWorld;
+	
+	float frameCount;
+};
+
+float3 ComputePinholeCameraRayDir(float2 uv)
+{
+	uv = uv * 2.0f - 1.0f;
+	return uv.x * cameraU + uv.y * cameraV + cameraW;
+}
+
+float3 GetPrimaryRayDir(uint2 pixel, uint2 frameDim)
+{
+	float2 uv = (float2)(pixel + 0.5f) / frameDim;
+	return normalize(ComputePinholeCameraRayDir(uv));
+}
+
+float3 BackgroundColor(float3 direction)
+{
+	float t = 0.5f * (direction.y + 1.0f);
+	return (1.0f - t) * float3(1.0f,1.0f,1.0f) + t * float3(0.5f,0.7f,1.0f);
+}
+
+[shader("miss")]
+void MissShader(inout PathPayload pathState : SV_RayPayload)
+{
+	if(pathState.isShadowRay) return;
+	if(pathState.pathLength == 0)
+		pathState.outputcolor += pathState.thp * BackgroundColor(pathState.direction);
+	pathState.isTerminated = true;
+
+}
+
+[shader("raygeneration")]
+void RayGen()
+{
+    uint2 dispatchIdx = DispatchRaysIndex().xy;
+    uint2 dimensions = DispatchRaysDimensions().xy;
+	
+	float3 primaryDir = GetPrimaryRayDir(dispatchIdx,dimensions);
+	float4 color = float4(0,0,0,0);
+
+	float c = 16;
+
+	for(int i=0;i<c;i++)
+	{
+	SampleGenerator sg;
+	sg.Init(dispatchIdx,frameCount * c + i);
+
+	PathPayload pathState{};
+	pathState.originPos = posW;
+	pathState.outputcolor = float4(0,0,0,0);
+	pathState.sg = sg;
+	pathState.direction = primaryDir;
+	pathState.thp = 1.0f;
+	pathState.pathLength = 0;
+	pathState.isTerminated = false;
+	pathState.isShadowRay = false;
+	pathState.isPrimaryHit = true;
+
+	while(!pathState.isTerminated)
+	{
+		Ray ray = pathState.GetNextRay();
+		TraceRay(AccelerationStructure, RAY_FLAG_NONE, 0xFF,0,1,0,ray.toRayDesc(),pathState);
+		pathState.isPrimaryHit = false;
+	}
+
+    color += saturate(float4(pathState.outputcolor,1.0f) / c);
+	}
+
+	RenderTarget[dispatchIdx] = color;
+}
